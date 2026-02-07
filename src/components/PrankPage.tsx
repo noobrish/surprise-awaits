@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 
@@ -12,12 +12,95 @@ const gradientClasses = [
   'gradient-bg-5',
 ];
 
+// Floating emoji component
+const FloatingEmoji = ({ id, isHeavy }: { id: number; isHeavy: boolean }) => {
+  const randomX = Math.random() * 100;
+  const randomDelay = Math.random() * 0.5;
+  const size = isHeavy ? Math.random() * 40 + 30 : 40;
+  
+  return (
+    <motion.div
+      key={id}
+      className="fixed pointer-events-none z-50 select-none"
+      style={{ left: `${randomX}%`, fontSize: size }}
+      initial={{ y: window.innerHeight + 50, opacity: 1, rotate: 0 }}
+      animate={{ 
+        y: -100, 
+        opacity: [1, 1, 0],
+        rotate: Math.random() > 0.5 ? 360 : -360
+      }}
+      transition={{ 
+        duration: isHeavy ? 2 : 3, 
+        delay: randomDelay,
+        ease: "easeOut"
+      }}
+    >
+      😂
+    </motion.div>
+  );
+};
+
 const PrankPage = () => {
   const [screen, setScreen] = useState<Screen>('error');
   const [noButtonPosition, setNoButtonPosition] = useState({ x: 0, y: 0 });
   const [currentGradient, setCurrentGradient] = useState(0);
   const [showButtons, setShowButtons] = useState(true);
   const [hasClickedNo, setHasClickedNo] = useState(false);
+  const [noClickCount, setNoClickCount] = useState(0);
+  const [floatingEmojis, setFloatingEmojis] = useState<number[]>([]);
+  const emojiIdRef = useRef(0);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  const playLaughSound = useCallback((isHeavy: boolean) => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+    const ctx = audioContextRef.current;
+    
+    // Create a laughing-like sound using oscillators
+    const createLaughBurst = (startTime: number, frequency: number, volume: number) => {
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      oscillator.frequency.value = frequency;
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0, startTime);
+      gainNode.gain.linearRampToValueAtTime(volume, startTime + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + 0.15);
+      
+      oscillator.start(startTime);
+      oscillator.stop(startTime + 0.15);
+    };
+    
+    const now = ctx.currentTime;
+    const baseVolume = isHeavy ? 0.3 : 0.1;
+    const laughCount = isHeavy ? 8 : 4;
+    
+    for (let i = 0; i < laughCount; i++) {
+      const freq = isHeavy 
+        ? 300 + Math.random() * 200 
+        : 400 + Math.random() * 100;
+      createLaughBurst(now + i * 0.12, freq, baseVolume * (1 - i * 0.1));
+    }
+  }, []);
+
+  const spawnEmojis = useCallback((count: number, isHeavy: boolean) => {
+    const newEmojis: number[] = [];
+    for (let i = 0; i < count; i++) {
+      emojiIdRef.current += 1;
+      newEmojis.push(emojiIdRef.current);
+    }
+    setFloatingEmojis(prev => [...prev, ...newEmojis]);
+    
+    // Clean up emojis after animation
+    setTimeout(() => {
+      setFloatingEmojis(prev => prev.filter(id => !newEmojis.includes(id)));
+    }, isHeavy ? 2500 : 3500);
+  }, []);
 
   const moveNoButton = useCallback(() => {
     const buttonWidth = 120;
@@ -78,13 +161,25 @@ const PrankPage = () => {
 
   const handleNo = () => {
     setHasClickedNo(true);
+    const newCount = noClickCount + 1;
+    setNoClickCount(newCount);
     moveNoButton();
     setCurrentGradient((prev) => (prev + 1) % gradientClasses.length);
+    
+    // After 30 clicks - heavy laugh and many emojis
+    if (newCount >= 30) {
+      playLaughSound(true);
+      spawnEmojis(8 + Math.floor(Math.random() * 5), true);
+    }
+    // After 15 clicks - soft laugh and one emoji
+    else if (newCount >= 15) {
+      playLaughSound(false);
+      spawnEmojis(1, false);
+    }
   };
 
   useEffect(() => {
     if (hasClickedNo && screen === 'question') {
-      // Initialize position when first clicked
       moveNoButton();
     }
   }, [hasClickedNo, screen, moveNoButton]);
@@ -226,6 +321,13 @@ const PrankPage = () => {
             NO
           </motion.button>
         )}
+      </AnimatePresence>
+
+      {/* Floating emojis */}
+      <AnimatePresence>
+        {floatingEmojis.map(id => (
+          <FloatingEmoji key={id} id={id} isHeavy={noClickCount >= 30} />
+        ))}
       </AnimatePresence>
     </div>
   );
